@@ -5,12 +5,34 @@ import html
 
 app = FastAPI()
 
-# Replace this with your real public URL after deployment.
-# Example: https://your-app-name.onrender.com
+# Replace this after deployment
 BASE_URL = "https://whatsapp-preview-generator.onrender.com"
 
-# Fixed public image for testing WhatsApp preview
-FIXED_IMAGE_URL = "https://upload.wikimedia.org/wikipedia/commons/a/a9/Example.jpg"
+# Fixed preview image for testing
+IMAGE_URL = "https://upload.wikimedia.org/wikipedia/commons/a/a9/Example.jpg"
+
+# Final destination when image is clicked
+CLICK_TARGET = (
+    "https://partner-adgen.deriv.ai/share/ad/"
+    "1a55f725-3936-4ffd-8521-44adcc925810"
+    "?ref=https%3A%2F%2Fpartner-sandbox-tracking.deriv.com%2Fclick"
+    "%3Fa%3D2676%26o%3D1%26c%3D3%26link_id%3D1"
+)
+
+
+def build_ad_description(word: str) -> str:
+    word_lower = word.lower().strip()
+
+    if word_lower == "apple":
+        return (
+            "Fresh, crisp, and irresistibly delicious — discover apples that bring "
+            "natural sweetness, everyday goodness, and a bite of pure refreshment."
+        )
+
+    return (
+        f"Discover {word} like never before — bold, eye-catching, and designed to "
+        f"stand out. A simple idea, presented with premium appeal."
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -21,11 +43,11 @@ def home():
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>WhatsApp Preview Demo</title>
+        <title>WhatsApp Ad Preview Demo</title>
         <style>
             body {
                 font-family: Arial, sans-serif;
-                max-width: 700px;
+                max-width: 720px;
                 margin: 50px auto;
                 padding: 20px;
                 line-height: 1.5;
@@ -69,37 +91,22 @@ def home():
                 background: #f5f5f5;
                 font-size: 14px;
             }
-            .small {
-                margin-top: 16px;
-                font-size: 13px;
-                color: #666;
-                word-break: break-word;
-            }
         </style>
     </head>
     <body>
-        <h1>WhatsApp Preview Demo</h1>
-        <p>Type a word, then share a public link to WhatsApp. The preview comes from the shared URL's Open Graph tags.</p>
+        <h1>WhatsApp Ad Preview Demo</h1>
+        <p>Enter a word, then share it to WhatsApp with a preview card.</p>
 
         <form action="/share" method="get">
             <div class="row">
-                <input
-                    type="text"
-                    name="word"
-                    placeholder="Enter a word"
-                    required
-                />
+                <input type="text" name="word" placeholder="Enter a word" required />
                 <button type="submit">Share to WhatsApp</button>
             </div>
         </form>
 
         <div class="note">
-            This demo shares a URL like <code>/p/yourword</code>. That page includes
-            Open Graph metadata so WhatsApp can build a preview card.
-        </div>
-
-        <div class="small">
-            After deployment, make sure BASE_URL matches your real public domain.
+            The shared page will show a preview title, description, and image.
+            Clicking the image will redirect to your target ad link.
         </div>
     </body>
     </html>
@@ -109,11 +116,8 @@ def home():
 @app.get("/share")
 def share(word: str = Query(..., min_length=1)):
     clean_word = word.strip()
-    encoded_word = quote(clean_word)
-    preview_url = f"{BASE_URL}/p/{encoded_word}"
-
-    # This opens WhatsApp share with the public preview URL
-    whatsapp_text = quote(f"Check this out: {preview_url}")
+    preview_url = f"{BASE_URL}/p/{quote(clean_word)}"
+    whatsapp_text = quote(preview_url)
     return RedirectResponse(url=f"https://wa.me/?text={whatsapp_text}")
 
 
@@ -121,10 +125,9 @@ def share(word: str = Query(..., min_length=1)):
 def preview_page(word: str, request: Request):
     clean_word = word.strip()
     safe_word = html.escape(clean_word)
-
+    description = build_ad_description(clean_word)
+    safe_description = html.escape(description)
     page_url = str(request.url)
-    title = f"Word preview: {safe_word}"
-    description = f"This is a demo WhatsApp preview for the word '{safe_word}'."
 
     return f"""
     <!DOCTYPE html>
@@ -132,32 +135,61 @@ def preview_page(word: str, request: Request):
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>{title}</title>
+        <title>{safe_word}</title>
 
-        <!-- Open Graph tags used by WhatsApp / link preview consumers -->
         <meta property="og:type" content="website" />
-        <meta property="og:title" content="{title}" />
-        <meta property="og:description" content="{description}" />
+        <meta property="og:title" content="{safe_word}" />
+        <meta property="og:description" content="{safe_description}" />
         <meta property="og:url" content="{page_url}" />
-        <meta property="og:image" content="{FIXED_IMAGE_URL}" />
+        <meta property="og:image" content="{IMAGE_URL}" />
 
-        <!-- Optional extras -->
         <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content="{title}" />
-        <meta name="twitter:description" content="{description}" />
-        <meta name="twitter:image" content="{FIXED_IMAGE_URL}" />
+        <meta name="twitter:title" content="{safe_word}" />
+        <meta name="twitter:description" content="{safe_description}" />
+        <meta name="twitter:image" content="{IMAGE_URL}" />
+
+        <style>
+            body {{
+                font-family: Arial, sans-serif;
+                max-width: 720px;
+                margin: 50px auto;
+                padding: 20px;
+                line-height: 1.5;
+            }}
+            h1 {{
+                margin-bottom: 10px;
+            }}
+            p {{
+                color: #444;
+                margin-bottom: 24px;
+            }}
+            .image-link {{
+                display: inline-block;
+                text-decoration: none;
+            }}
+            img {{
+                max-width: 100%;
+                height: auto;
+                border-radius: 12px;
+                cursor: pointer;
+                box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+            }}
+            .hint {{
+                font-size: 14px;
+                color: #666;
+                margin-top: 12px;
+            }}
+        </style>
     </head>
-    <body style="font-family: Arial, sans-serif; max-width: 700px; margin: 50px auto; padding: 20px;">
+    <body>
         <h1>{safe_word}</h1>
-        <p>This page exists mainly so WhatsApp can generate a link preview.</p>
-        <img
-            src="{FIXED_IMAGE_URL}"
-            alt="Preview image"
-            style="max-width: 100%; height: auto; border-radius: 10px;"
-        />
-        <p style="margin-top: 20px; color: #666;">
-            Shared URL: {html.escape(page_url)}
-        </p>
+        <p>{safe_description}</p>
+
+        <a class="image-link" href="{CLICK_TARGET}">
+            <img src="{IMAGE_URL}" alt="{safe_word}" />
+        </a>
+
+        <div class="hint">Tap the image to continue.</div>
     </body>
     </html>
     """

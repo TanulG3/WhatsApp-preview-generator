@@ -7,7 +7,7 @@ app = FastAPI()
 
 # Replace this with your real public URL after deployment.
 # Example: https://your-app-name.onrender.com
-BASE_URL = "https://your-app-name.onrender.com"
+BASE_URL = "https://whatsapp-preview-generator.onrender.com"
 
 # Fixed public image for testing WhatsApp preview
 FIXED_IMAGE_URL = "https://upload.wikimedia.org/wikipedia/commons/a/a9/Example.jpg"

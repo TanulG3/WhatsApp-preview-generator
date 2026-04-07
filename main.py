@@ -116,24 +116,17 @@ def get_font(size: int, bold: bool = False):
     return ImageFont.load_default()
 
 
-def rounded_mask(size, radius):
-    mask = Image.new("L", size, 0)
-    draw = ImageDraw.Draw(mask)
-    draw.rounded_rectangle((0, 0, size[0], size[1]), radius=radius, fill=255)
-    return mask
-
-
 def wrap_text(text, font, max_width, draw):
     words = text.split()
     lines = []
     current = ""
 
     for word in words:
-        test = word if not current else current + " " + word
-        bbox = draw.textbbox((0, 0), test, font=font)
+        trial = word if not current else current + " " + word
+        bbox = draw.textbbox((0, 0), trial, font=font)
         width = bbox[2] - bbox[0]
         if width <= max_width:
-            current = test
+            current = trial
         else:
             if current:
                 lines.append(current)
@@ -145,178 +138,155 @@ def wrap_text(text, font, max_width, draw):
     return lines
 
 
-def draw_vertical_gradient(width, height, top_color, bottom_color):
-    img = Image.new("RGB", (width, height), top_color)
-    draw = ImageDraw.Draw(img)
-
-    for y in range(height):
-        ratio = y / max(height - 1, 1)
-        r = int(top_color[0] * (1 - ratio) + bottom_color[0] * ratio)
-        g = int(top_color[1] * (1 - ratio) + bottom_color[1] * ratio)
-        b = int(top_color[2] * (1 - ratio) + bottom_color[2] * ratio)
-        draw.line((0, y, width, y), fill=(r, g, b))
-
-    return img
-
-
-def add_soft_glow(base_img):
-    glow = Image.new("RGBA", base_img.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(glow)
-
-    draw.ellipse((40, 80, 480, 560), fill=(60, 90, 255, 55))
-    draw.ellipse((780, 330, 1160, 660), fill=(80, 255, 200, 45))
-    draw.ellipse((500, -40, 980, 260), fill=(120, 120, 255, 30))
-
-    glow = glow.filter(ImageFilter.GaussianBlur(70))
-    return Image.alpha_composite(base_img.convert("RGBA"), glow)
-
-
-def fit_image_inside(img, max_w, max_h):
-    ratio = min(max_w / img.width, max_h / img.height)
-    new_w = max(1, int(img.width * ratio))
-    new_h = max(1, int(img.height * ratio))
-    return img.resize((new_w, new_h), Image.LANCZOS)
+def rounded_rectangle_mask(size, radius):
+    mask = Image.new("L", size, 0)
+    d = ImageDraw.Draw(mask)
+    d.rounded_rectangle((0, 0, size[0], size[1]), radius=radius, fill=255)
+    return mask
 
 
 def build_og_image(word: str):
-    W, H = 1200, 630
+    # Higher-res, same WhatsApp-friendly aspect ratio
+    W, H = 1600, 840
 
     # Background
-    bg = draw_vertical_gradient(W, H, (8, 12, 18), (16, 32, 34))
-    bg = add_soft_glow(bg)
+    bg = Image.new("RGB", (W, H), (10, 14, 18))
+    bg_rgba = bg.convert("RGBA")
 
-    # Main white content card
-    card_x, card_y = 130, 56
-    card_w, card_h = 940, 440
-    card_radius = 28
+    glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    gd = ImageDraw.Draw(glow)
+    gd.ellipse((60, 100, 700, 760), fill=(40, 90, 255, 45))
+    gd.ellipse((980, 160, 1560, 760), fill=(50, 220, 170, 35))
+    gd.ellipse((500, -80, 1200, 260), fill=(110, 120, 255, 20))
+    glow = glow.filter(ImageFilter.GaussianBlur(90))
+    bg_rgba = Image.alpha_composite(bg_rgba, glow)
 
+    # Content region
+    outer_margin_x = 55
+    outer_margin_y = 40
+    content_x1 = outer_margin_x
+    content_y1 = outer_margin_y
+    content_x2 = W - outer_margin_x
+    content_y2 = H - outer_margin_y
+    content_w = content_x2 - content_x1
+    content_h = content_y2 - content_y1
+
+    gap = 24
+    left_w = (content_w - gap) // 2
+    right_w = content_w - gap - left_w
+
+    left_x = content_x1
+    left_y = content_y1
+    right_x = left_x + left_w + gap
+    right_y = content_y1
+
+    panel_radius = 34
+
+    # Shadows
     shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     sd = ImageDraw.Draw(shadow)
     sd.rounded_rectangle(
-        (card_x + 10, card_y + 14, card_x + card_w + 10, card_y + card_h + 14),
-        radius=card_radius,
+        (left_x + 8, left_y + 12, left_x + left_w + 8, left_y + content_h + 12),
+        radius=panel_radius,
         fill=(0, 0, 0, 90),
     )
-    shadow = shadow.filter(ImageFilter.GaussianBlur(18))
-    composed = Image.alpha_composite(bg.convert("RGBA"), shadow)
+    sd.rounded_rectangle(
+        (right_x + 8, right_y + 12, right_x + right_w + 8, right_y + content_h + 12),
+        radius=panel_radius,
+        fill=(0, 0, 0, 90),
+    )
+    shadow = shadow.filter(ImageFilter.GaussianBlur(22))
+    bg_rgba = Image.alpha_composite(bg_rgba, shadow)
 
-    draw = ImageDraw.Draw(composed)
+    draw = ImageDraw.Draw(bg_rgba)
+
+    # Right text card
     draw.rounded_rectangle(
-        (card_x, card_y, card_x + card_w, card_y + card_h),
-        radius=card_radius,
-        fill=(246, 247, 242, 255),
+        (right_x, right_y, right_x + right_w, right_y + content_h),
+        radius=panel_radius,
+        fill=(245, 246, 242, 255),
     )
 
-    # Left image area: make it as large as possible while leaving text room
-    padding = 26
-    gap = 28
-    img_area_x = card_x + padding
-    img_area_y = card_y + padding
-    img_area_w = 360
-    img_area_h = card_h - (padding * 2)
-
-    text_area_x = img_area_x + img_area_w + gap
-    text_area_y = img_area_y + 18
-    text_area_w = card_x + card_w - padding - text_area_x
-    text_area_h = img_area_h - 30
-
-    # Fetch source portrait image
+    # Fetch source image
     resp = requests.get(SOURCE_IMAGE_URL, timeout=20)
     resp.raise_for_status()
     src = Image.open(BytesIO(resp.content)).convert("RGB")
 
-    # Fit image fully visible and as large as possible
-    fitted = fit_image_inside(src, img_area_w, img_area_h)
-
-    # Image frame with rounded corners
-    img_frame = Image.new("RGBA", (img_area_w, img_area_h), (0, 0, 0, 0))
-    frame_draw = ImageDraw.Draw(img_frame)
-    frame_draw.rounded_rectangle(
-        (0, 0, img_area_w, img_area_h),
-        radius=22,
+    # Left image panel
+    left_panel = Image.new("RGBA", (left_w, content_h), (18, 18, 18, 255))
+    lp_draw = ImageDraw.Draw(left_panel)
+    lp_draw.rounded_rectangle(
+        (0, 0, left_w, content_h),
+        radius=panel_radius,
         fill=(18, 18, 18, 255),
     )
 
-    # Center fitted image in frame
-    paste_x = (img_area_w - fitted.width) // 2
-    paste_y = (img_area_h - fitted.height) // 2
+    # Fit image fully visible within left panel
+    inner_pad = 18
+    max_w = left_w - inner_pad * 2
+    max_h = content_h - inner_pad * 2
+    ratio = min(max_w / src.width, max_h / src.height)
+    new_w = int(src.width * ratio)
+    new_h = int(src.height * ratio)
+    fitted = src.resize((new_w, new_h), Image.LANCZOS).convert("RGBA")
 
-    # Slight inner shadow effect
-    frame_shadow = Image.new("RGBA", (img_area_w, img_area_h), (0, 0, 0, 0))
-    fsd = ImageDraw.Draw(frame_shadow)
-    fsd.rounded_rectangle(
-        (4, 6, img_area_w - 4, img_area_h - 2),
-        radius=22,
-        fill=(0, 0, 0, 40),
+    img_x = (left_w - new_w) // 2
+    img_y = (content_h - new_h) // 2
+
+    img_mask = rounded_rectangle_mask((new_w, new_h), 24)
+    left_panel.paste(fitted, (img_x, img_y), mask=img_mask)
+
+    # Subtle overlay for consistency
+    left_overlay = Image.new("RGBA", (left_w, content_h), (0, 0, 0, 0))
+    lod = ImageDraw.Draw(left_overlay)
+    lod.rounded_rectangle(
+        (0, 0, left_w, content_h),
+        radius=panel_radius,
+        fill=(0, 0, 0, 18),
     )
-    frame_shadow = frame_shadow.filter(ImageFilter.GaussianBlur(10))
-    img_frame = Image.alpha_composite(img_frame, frame_shadow)
+    left_panel = Image.alpha_composite(left_panel, left_overlay)
 
-    inner = Image.new("RGBA", (img_area_w, img_area_h), (0, 0, 0, 0))
-    inner.paste(fitted.convert("RGBA"), (paste_x, paste_y))
+    bg_rgba.alpha_composite(left_panel, (left_x, left_y))
 
-    mask = rounded_mask((img_area_w, img_area_h), 22)
-    img_frame = Image.composite(inner, img_frame, mask)
-
-    composed.alpha_composite(img_frame, (img_area_x, img_area_y))
-
-    # Text
+    # Text in right card
     title = build_title(word)
     description = build_description(word)
 
-    title_font = get_font(54, bold=True)
-    desc_font = get_font(34, bold=False)
-    domain_font = get_font(28, bold=False)
-    link_icon_font = get_font(30, bold=False)
+    title_font = get_font(84, bold=True)
+    desc_font = get_font(48, bold=False)
 
-    text_draw = ImageDraw.Draw(composed)
+    td = ImageDraw.Draw(bg_rgba)
 
-    # Title
-    text_draw.text(
-        (text_area_x, text_area_y),
+    text_pad_x = 46
+    text_pad_top = 88
+    text_x = right_x + text_pad_x
+    text_y = right_y + text_pad_top
+    text_max_w = right_w - text_pad_x * 2
+
+    td.text(
+        (text_x, text_y),
         title,
         font=title_font,
-        fill=(14, 18, 20, 255),
+        fill=(18, 22, 24, 255),
     )
 
-    # Description
-    title_bbox = text_draw.textbbox((text_area_x, text_area_y), title, font=title_font)
-    desc_y = title_bbox[3] + 26
-    desc_lines = wrap_text(description, desc_font, text_area_w, text_draw)
+    title_bbox = td.textbbox((text_x, text_y), title, font=title_font)
+    desc_y = title_bbox[3] + 28
 
+    desc_lines = wrap_text(description, desc_font, text_max_w, td)
     current_y = desc_y
     for line in desc_lines[:3]:
-        text_draw.text(
-            (text_area_x, current_y),
+        td.text(
+            (text_x, current_y),
             line,
             font=desc_font,
             fill=(92, 96, 102, 255),
         )
-        line_bbox = text_draw.textbbox((text_area_x, current_y), line, font=desc_font)
-        current_y = line_bbox[3] + 16
+        line_bbox = td.textbbox((text_x, current_y), line, font=desc_font)
+        current_y = line_bbox[3] + 14
 
-    # Domain row
-    domain = "whatsapp-preview-generator.onrender.com"
-    domain_y = card_y + card_h - 96
-
-    text_draw.text(
-        (text_area_x, domain_y),
-        "🔗",
-        font=link_icon_font,
-        fill=(16, 18, 20, 255),
-        embedded_color=True,
-    )
-
-    text_draw.text(
-        (text_area_x + 46, domain_y - 1),
-        domain,
-        font=domain_font,
-        fill=(16, 18, 20, 255),
-    )
-
-    # Export
     out = BytesIO()
-    composed.convert("RGB").save(out, format="JPEG", quality=92, optimize=True)
+    bg_rgba.convert("RGB").save(out, format="JPEG", quality=92, optimize=True)
     out.seek(0)
     return out.read()
 
@@ -387,8 +357,6 @@ def og_image(word: str):
 @app.get("/p/{word}", response_class=HTMLResponse)
 def preview(word: str, request: Request):
     clean_word = word.strip()
-    safe_word = html.escape(build_title(clean_word))
-    description = html.escape(build_description(clean_word))
     page_url = str(request.url)
     og_image_url = f"{BASE_URL}/og-image/{quote(clean_word)}"
 
@@ -421,17 +389,17 @@ def preview(word: str, request: Request):
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>{safe_word}</title>
+        <title></title>
 
         <meta property="og:type" content="website" />
-        <meta property="og:title" content="{safe_word}" />
-        <meta property="og:description" content="{description}" />
+        <meta property="og:title" content="" />
+        <meta property="og:description" content="" />
         <meta property="og:image" content="{og_image_url}" />
         <meta property="og:url" content="{page_url}" />
 
         <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content="{safe_word}" />
-        <meta name="twitter:description" content="{description}" />
+        <meta name="twitter:title" content="" />
+        <meta name="twitter:description" content="" />
         <meta name="twitter:image" content="{og_image_url}" />
 
         <meta http-equiv="refresh" content="0; url={CLICK_TARGET}" />

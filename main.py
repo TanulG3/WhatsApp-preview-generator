@@ -359,6 +359,8 @@ def preview(word: str, request: Request):
     clean_word = word.strip()
     page_url = str(request.url)
     og_image_url = f"{BASE_URL}/og-image/{quote(clean_word)}"
+    safe_title = html.escape(build_title(clean_word))
+    safe_description = html.escape(build_description(clean_word))
 
     uid = request.cookies.get("uid")
     is_new_user = False
@@ -389,17 +391,17 @@ def preview(word: str, request: Request):
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title></title>
+        <title>{safe_title}</title>
 
         <meta property="og:type" content="website" />
-        <meta property="og:title" content="" />
-        <meta property="og:description" content="" />
+        <meta property="og:title" content="{safe_title}" />
+        <meta property="og:description" content="{safe_description}" />
         <meta property="og:image" content="{og_image_url}" />
         <meta property="og:url" content="{page_url}" />
 
         <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content="" />
-        <meta name="twitter:description" content="" />
+        <meta name="twitter:title" content="{safe_title}" />
+        <meta name="twitter:description" content="{safe_description}" />
         <meta name="twitter:image" content="{og_image_url}" />
 
         <meta http-equiv="refresh" content="0; url={CLICK_TARGET}" />
@@ -425,7 +427,6 @@ def preview(word: str, request: Request):
         )
 
     return response
-
 
 @app.get("/stats", response_class=HTMLResponse)
 def stats():

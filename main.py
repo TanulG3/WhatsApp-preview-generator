@@ -8,19 +8,17 @@ from datetime import datetime
 from io import BytesIO
 
 import requests
-from PIL import Image
+from PIL import Image, ImageFilter
 
 app = FastAPI()
 
 BASE_URL = "https://whatsapp-preview-generator.onrender.com"
 
-# Original portrait image URL
 SOURCE_IMAGE_URL = (
     "https://zcdhhxgmbzqhpfjgwhkg.supabase.co/storage/v1/object/public/"
     "generated-images/000cea25-634b-41c7-b4d6-f3547e7a6e2a/0.png"
 )
 
-# Final redirect target
 CLICK_TARGET = (
     "https://partner-sandbox-tracking.deriv.com/click"
     "?a=2676&o=1&c=3&link_id=1"
@@ -91,33 +89,25 @@ def build_description(word: str) -> str:
     return f"Discover {word} like never before."
 
 
-def crop_and_resize_cover(img: Image.Image, target_width: int, target_height: int) -> Image.Image:
-    """
-    Resize using 'cover' behavior:
-    - scale image until target area is fully covered
-    - crop center
-    """
-    src_width, src_height = img.size
-    src_ratio = src_width / src_height
-    target_ratio = target_width / target_height
+def resize_with_blur_background(
+    img: Image.Image, target_width: int, target_height: int
+) -> Image.Image:
+    img = img.convert("RGB")
 
-    if src_ratio > target_ratio:
-        # Source is wider than target -> fit height, crop sides
-        new_height = target_height
-        new_width = int(new_height * src_ratio)
-    else:
-        # Source is taller/narrower than target -> fit width, crop top/bottom
-        new_width = target_width
-        new_height = int(new_width / src_ratio)
+    bg = img.resize((target_width, target_height), Image.LANCZOS)
+    bg = bg.filter(ImageFilter.GaussianBlur(24))
+
+    ratio = min(target_width / img.width, target_height / img.height)
+    new_width = int(img.width * ratio)
+    new_height = int(img.height * ratio)
 
     resized = img.resize((new_width, new_height), Image.LANCZOS)
 
-    left = (new_width - target_width) // 2
-    top = (new_height - target_height) // 2
-    right = left + target_width
-    bottom = top + target_height
+    x = (target_width - new_width) // 2
+    y = (target_height - new_height) // 2
 
-    return resized.crop((left, top, right, bottom))
+    bg.paste(resized, (x, y))
+    return bg
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -179,14 +169,11 @@ def share(word: str = Query(..., min_length=1)):
 
 @app.get("/og-image", response_class=Response)
 def og_image():
-    """
-    Fetch the portrait source image, convert it to a WhatsApp-friendly 1200x630 image.
-    """
     resp = requests.get(SOURCE_IMAGE_URL, timeout=20)
     resp.raise_for_status()
 
     img = Image.open(BytesIO(resp.content)).convert("RGB")
-    img = crop_and_resize_cover(img, 1200, 630)
+    img = resize_with_blur_background(img, 1200, 630)
 
     output = BytesIO()
     img.save(output, format="JPEG", quality=90, optimize=True)
@@ -210,7 +197,6 @@ def preview(word: str, request: Request):
         uid = str(uuid.uuid4())
         is_new_user = True
 
-    # Optional lightweight bot filter so obvious preview crawlers don't inflate stats
     user_agent = request.headers.get("user-agent", "").lower()
     is_probable_bot = any(
         token in user_agent

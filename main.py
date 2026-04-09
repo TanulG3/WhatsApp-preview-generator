@@ -263,7 +263,29 @@ def home():
     </body>
     </html>
     """
+@app.get("/robots.txt")
+def robots_txt():
+    return Response(
+        content="""User-agent: *
+Allow: /
 
+User-agent: facebookexternalhit
+Allow: /
+
+User-agent: Facebot
+Allow: /
+
+User-agent: Twitterbot
+Allow: /
+
+User-agent: WhatsApp
+Allow: /
+
+User-agent: TelegramBot
+Allow: /
+""",
+        media_type="text/plain"
+    )
 
 @app.get("/share")
 def share(word: str):

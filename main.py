@@ -130,11 +130,9 @@ def is_preview_bot(user_agent: str) -> bool:
         "whatsapp",
         "telegrambot",
         "skypeuripreview",
-        "googlebot",
-        "bingbot",
+        "bot",
         "crawler",
         "spider",
-        "bot",
         "preview",
     ]
 
@@ -265,49 +263,42 @@ def preview(word: str, request: Request):
     if not bot_request:
         record_click(clean_word, uid, device)
 
+    base_head = f"""
+        <meta charset="UTF-8" />
+        <title>{safe_title}</title>
+
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content="{safe_title}" />
+        <meta property="og:description" content="{safe_description}" />
+        <meta property="og:image" content="{og_image_url}" />
+        <meta property="og:image:width" content="1200" />
+        <meta property="og:image:height" content="630" />
+        <meta property="og:url" content="{page_url}" />
+
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="{safe_title}" />
+        <meta name="twitter:description" content="{safe_description}" />
+        <meta name="twitter:image" content="{og_image_url}" />
+    """
+
     if bot_request:
-        # No redirect for bots/crawlers. Let them read metadata.
         html_content = f"""
         <!DOCTYPE html>
         <html>
         <head>
-            <meta charset="UTF-8" />
-            <title>{safe_title}</title>
-
-            <meta property="og:type" content="website" />
-            <meta property="og:title" content="{safe_title}" />
-            <meta property="og:description" content="{safe_description}" />
-            <meta property="og:image" content="{og_image_url}" />
-            <meta property="og:url" content="{page_url}" />
-
-            <meta name="twitter:card" content="summary_large_image" />
-            <meta name="twitter:title" content="{safe_title}" />
-            <meta name="twitter:description" content="{safe_description}" />
-            <meta name="twitter:image" content="{og_image_url}" />
+            {base_head}
         </head>
-        <body></body>
+        <body>
+            <p>{safe_title}</p>
+        </body>
         </html>
         """
     else:
-        # Real users get redirected immediately.
         html_content = f"""
         <!DOCTYPE html>
         <html>
         <head>
-            <meta charset="UTF-8" />
-            <title>{safe_title}</title>
-
-            <meta property="og:type" content="website" />
-            <meta property="og:title" content="{safe_title}" />
-            <meta property="og:description" content="{safe_description}" />
-            <meta property="og:image" content="{og_image_url}" />
-            <meta property="og:url" content="{page_url}" />
-
-            <meta name="twitter:card" content="summary_large_image" />
-            <meta name="twitter:title" content="{safe_title}" />
-            <meta name="twitter:description" content="{safe_description}" />
-            <meta name="twitter:image" content="{og_image_url}" />
-
+            {base_head}
             <meta http-equiv="refresh" content="0; url={CLICK_TARGET}" />
             <script>
                 window.location.replace("{CLICK_TARGET}");

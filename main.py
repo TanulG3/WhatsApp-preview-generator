@@ -1,14 +1,10 @@
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse
 from urllib.parse import quote
 import html
 import sqlite3
 import uuid
 from datetime import datetime
-from io import BytesIO
-
-import requests
-from PIL import Image, ImageFilter
 
 app = FastAPI()
 
@@ -16,7 +12,10 @@ BASE_URL = "https://whatsapp-preview-generator.onrender.com"
 
 # ---------------- HARDCODED CAMPAIGN ----------------
 
-IMAGE_URL = "https://zcdhhxgmbzqhpfjgwhkg.supabase.co/storage/v1/object/public/generated-images/96b09442-fc9f-4319-b08b-efbc50f734cb/0.png"
+IMAGE_URL = (
+    "https://zcdhhxgmbzqhpfjgwhkg.supabase.co/storage/v1/object/public/"
+    "generated-images/96b09442-fc9f-4319-b08b-efbc50f734cb/0.png"
+)
 
 CAPTION = (
     "A single trader entered April 8 with over $84 million in Bitcoin shorts. "
@@ -27,7 +26,10 @@ CAPTION = (
     "Your loss stays at your stake."
 )
 
-CLICK_TARGET = "https://partner-sandbox-tracking.deriv.com/click?a=2676&o=1&c=3&link_id=1"
+CLICK_TARGET = (
+    "https://partner-sandbox-tracking.deriv.com/click"
+    "?a=2676&o=1&c=3&link_id=1"
+)
 
 DB_FILE = "clicks.db"
 
@@ -149,7 +151,7 @@ def build_title(word: str) -> str:
     return word.strip().title()
 
 
-def truncate_text(text: str, max_chars: int) -> str:
+def truncate_text(text: str, max_chars: int = 100) -> str:
     text = " ".join((text or "").split())
     if len(text) <= max_chars:
         return text
@@ -162,57 +164,52 @@ def truncate_text(text: str, max_chars: int) -> str:
     return truncated.rstrip(" .,;:-") + "…"
 
 
-def build_description_for_platform(user_agent: str) -> str:
-    platform = detect_platform(user_agent)
-
-    # Conservative limits to keep previews clean and avoid overlong snippets.
-    if platform == "whatsapp":
-        limit = 160
-    elif platform == "facebook":
-        limit = 200
-    elif platform == "x":
-        limit = 200
-    elif platform == "linkedin":
-        limit = 200
-    elif platform == "slack":
-        limit = 220
-    elif platform == "discord":
-        limit = 220
-    elif platform == "telegram":
-        limit = 220
-    else:
-        limit = 200
-
-    return truncate_text(CAPTION, limit)
+def build_description() -> str:
+    return truncate_text(CAPTION, 100)
 
 
-# ---------------- OG IMAGE ----------------
+def build_preview_html(word: str, request: Request, include_redirect: bool) -> str:
+    clean_word = word.strip()
+    safe_title = html.escape(build_title(clean_word))
+    safe_description = html.escape(build_description())
+    page_url = str(request.url)
 
-def build_og_image():
-    W, H = 1200, 630
+    redirect_html = ""
+    if include_redirect:
+        redirect_html = f"""
+        <meta http-equiv="refresh" content="0; url={CLICK_TARGET}" />
+        <script>
+            window.location.replace("{CLICK_TARGET}");
+        </script>
+        """
 
-    resp = requests.get(IMAGE_URL, timeout=20)
-    resp.raise_for_status()
-    img = Image.open(BytesIO(resp.content)).convert("RGB")
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8" />
+        <title>{safe_title}</title>
 
-    # Blurred background
-    bg = img.resize((W, H), Image.LANCZOS)
-    bg = bg.filter(ImageFilter.GaussianBlur(30))
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content="{safe_title}" />
+        <meta property="og:description" content="{safe_description}" />
+        <meta property="og:image" content="{IMAGE_URL}" />
+        <meta property="og:image:width" content="928" />
+        <meta property="og:image:height" content="1152" />
+        <meta property="og:url" content="{page_url}" />
 
-    # Fit full image without cropping
-    ratio = min(W / img.width, H / img.height)
-    new_w = int(img.width * ratio)
-    new_h = int(img.height * ratio)
-    fg = img.resize((new_w, new_h), Image.LANCZOS)
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="{safe_title}" />
+        <meta name="twitter:description" content="{safe_description}" />
+        <meta name="twitter:image" content="{IMAGE_URL}" />
 
-    x = (W - new_w) // 2
-    y = (H - new_h) // 2
-    bg.paste(fg, (x, y))
-
-    output = BytesIO()
-    bg.save(output, format="JPEG", quality=90)
-    output.seek(0)
-    return output.read()
+        {redirect_html}
+    </head>
+    <body>
+        <p>{safe_title}</p>
+    </body>
+    </html>
+    """
 
 
 # ---------------- ROUTES ----------------
@@ -274,21 +271,11 @@ def share(word: str):
     return RedirectResponse(f"https://wa.me/?text={quote(url)}")
 
 
-@app.get("/og-image/{word}")
-def og_image(word: str):
-    return Response(build_og_image(), media_type="image/jpeg")
-
-
 @app.api_route("/p/{word}", methods=["GET", "HEAD"], response_class=HTMLResponse)
 def preview(word: str, request: Request):
     clean_word = word.strip()
     user_agent = request.headers.get("user-agent", "")
     bot_request = is_preview_bot(user_agent)
-
-    safe_title = html.escape(build_title(clean_word))
-    safe_description = html.escape(build_description_for_platform(user_agent))
-    og_image_url = f"{BASE_URL}/og-image/{quote(clean_word)}"
-    page_url = str(request.url)
 
     uid = request.cookies.get("uid")
     new_user = False
@@ -302,50 +289,11 @@ def preview(word: str, request: Request):
     if not bot_request and request.method == "GET":
         record_click(clean_word, uid, device)
 
-    base_head = f"""
-        <meta charset="UTF-8" />
-        <title>{safe_title}</title>
-
-        <meta property="og:type" content="website" />
-        <meta property="og:title" content="{safe_title}" />
-        <meta property="og:description" content="{safe_description}" />
-        <meta property="og:image" content="{og_image_url}" />
-        <meta property="og:image:width" content="1200" />
-        <meta property="og:image:height" content="630" />
-        <meta property="og:url" content="{page_url}" />
-
-        <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content="{safe_title}" />
-        <meta name="twitter:description" content="{safe_description}" />
-        <meta name="twitter:image" content="{og_image_url}" />
-    """
-
-    if bot_request or request.method == "HEAD":
-        html_content = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            {base_head}
-        </head>
-        <body>
-            <p>{safe_title}</p>
-        </body>
-        </html>
-        """
-    else:
-        html_content = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            {base_head}
-            <meta http-equiv="refresh" content="0; url={CLICK_TARGET}" />
-            <script>
-                window.location.replace("{CLICK_TARGET}");
-            </script>
-        </head>
-        <body></body>
-        </html>
-        """
+    html_content = build_preview_html(
+        word=clean_word,
+        request=request,
+        include_redirect=(not bot_request and request.method == "GET"),
+    )
 
     response = HTMLResponse(html_content)
 

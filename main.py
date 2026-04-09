@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from urllib.parse import quote
 import html
@@ -8,7 +8,7 @@ from datetime import datetime
 from io import BytesIO
 
 import requests
-from PIL import Image, ImageFilter, ImageDraw, ImageFont
+from PIL import Image, ImageFilter
 
 app = FastAPI()
 
@@ -18,8 +18,14 @@ BASE_URL = "https://whatsapp-preview-generator.onrender.com"
 
 IMAGE_URL = "https://zcdhhxgmbzqhpfjgwhkg.supabase.co/storage/v1/object/public/generated-images/96b09442-fc9f-4319-b08b-efbc50f734cb/0.png"
 
-CAPTION = """A single trader entered April 8 with over $84 million in Bitcoin shorts. Entry was between $66,975 and $67,264. Bitcoin ran to $72,767, and the account closed at $914. Across the market, $596 million in positions cleared inside 24 hours, with shorts absorbing the bulk. That is what a crowded position looks like when the squeeze arrives without warning.
-Bitcoin Multipliers on Deriv Trader. Up to 800x. Your loss stays at your stake."""
+CAPTION = (
+    "A single trader entered April 8 with over $84 million in Bitcoin shorts. "
+    "Entry was between $66,975 and $67,264. Bitcoin ran to $72,767, and the account "
+    "closed at $914. Across the market, $596 million in positions cleared inside 24 hours, "
+    "with shorts absorbing the bulk. That is what a crowded position looks like when the "
+    "squeeze arrives without warning. Bitcoin Multipliers on Deriv Trader. Up to 800x. "
+    "Your loss stays at your stake."
+)
 
 CLICK_TARGET = "https://partner-sandbox-tracking.deriv.com/click?a=2676&o=1&c=3&link_id=1"
 
@@ -49,7 +55,7 @@ def init_db():
 init_db()
 
 
-def record_click(word, uid, device):
+def record_click(word: str, uid: str, device: str):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute(
@@ -74,6 +80,7 @@ def get_stats():
         SELECT device_type, COUNT(*)
         FROM clicks
         GROUP BY device_type
+        ORDER BY COUNT(*) DESC
     """)
     device_data = cursor.fetchall()
 
@@ -91,103 +98,83 @@ def get_stats():
 
 # ---------------- HELPERS ----------------
 
-def get_font(size, bold=False):
-    try:
-        if bold:
-            return ImageFont.truetype(
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", size
-            )
-        return ImageFont.truetype(
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", size
-        )
-    except:
-        return ImageFont.load_default()
-
-
-def wrap_text(text, font, max_width, draw):
-    words = text.split()
-    lines = []
-    current = ""
-
-    for word in words:
-        test = word if not current else current + " " + word
-        bbox = draw.textbbox((0, 0), test, font=font)
-
-        if bbox[2] <= max_width:
-            current = test
-        else:
-            lines.append(current)
-            current = word
-
-    if current:
-        lines.append(current)
-
-    return lines
-
-
-def detect_device(user_agent):
+def detect_device(user_agent: str) -> str:
     ua = (user_agent or "").lower()
 
-    if "ipad" in ua or "tablet" in ua:
+    if not ua:
+        return "unknown"
+
+    if any(x in ua for x in ["ipad", "tablet", "sm-t", "kindle", "silk"]):
         return "tablet"
-    if "mobile" in ua or "iphone" in ua or "android" in ua:
+
+    if any(x in ua for x in ["mobile", "iphone", "android", "phone", "ipod", "windows phone"]):
         return "mobile"
-    if "windows" in ua or "macintosh" in ua:
+
+    if any(x in ua for x in ["windows", "macintosh", "linux", "x11", "cros"]):
         return "desktop"
 
     return "unknown"
 
 
+def is_preview_bot(user_agent: str) -> bool:
+    ua = (user_agent or "").lower()
+
+    bot_markers = [
+        "facebookexternalhit",
+        "facebot",
+        "twitterbot",
+        "x-twitterbot",
+        "linkedinbot",
+        "slackbot",
+        "discordbot",
+        "whatsapp",
+        "telegrambot",
+        "skypeuripreview",
+        "googlebot",
+        "bingbot",
+        "crawler",
+        "spider",
+        "bot",
+        "preview",
+    ]
+
+    return any(marker in ua for marker in bot_markers)
+
+
+def build_title(word: str) -> str:
+    return word.strip().title()
+
+
+def build_description() -> str:
+    return CAPTION
+
+
 # ---------------- OG IMAGE ----------------
 
-def build_og_image(word):
+def build_og_image():
     W, H = 1200, 630
 
     resp = requests.get(IMAGE_URL, timeout=20)
+    resp.raise_for_status()
     img = Image.open(BytesIO(resp.content)).convert("RGB")
 
-    # Background blur
+    # blurred background
     bg = img.resize((W, H), Image.LANCZOS)
     bg = bg.filter(ImageFilter.GaussianBlur(30))
 
-    # Foreground fit
+    # fit full image without cropping
     ratio = min(W / img.width, H / img.height)
-    new_size = (int(img.width * ratio), int(img.height * ratio))
-    fg = img.resize(new_size, Image.LANCZOS)
+    new_w = int(img.width * ratio)
+    new_h = int(img.height * ratio)
+    fg = img.resize((new_w, new_h), Image.LANCZOS)
 
-    x = (W - new_size[0]) // 2
-    y = (H - new_size[1]) // 2
+    x = (W - new_w) // 2
+    y = (H - new_h) // 2
     bg.paste(fg, (x, y))
 
-    # Gradient overlay
-    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    od = ImageDraw.Draw(overlay)
-
-    for i in range(H):
-        alpha = int(180 * (i / H))
-        od.rectangle((0, i, W, i + 1), fill=(0, 0, 0, alpha))
-
-    bg = Image.alpha_composite(bg.convert("RGBA"), overlay)
-    draw = ImageDraw.Draw(bg)
-
-    title = word.title()
-
-    title_font = get_font(60, bold=True)
-    desc_font = get_font(30)
-
-    draw.text((40, H - 200), title, font=title_font, fill=(255, 255, 255))
-
-    lines = wrap_text(CAPTION, desc_font, W - 80, draw)
-    y_text = H - 120
-
-    for line in lines[:3]:
-        draw.text((40, y_text), line, font=desc_font, fill=(220, 220, 220))
-        y_text += 36
-
     output = BytesIO()
-    bg.convert("RGB").save(output, format="JPEG", quality=90)
+    bg.save(output, format="JPEG", quality=90)
     output.seek(0)
-
     return output.read()
 
 
@@ -199,18 +186,46 @@ def home():
     <!DOCTYPE html>
     <html>
     <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>WhatsApp Preview Generator</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                max-width: 720px;
+                margin: 50px auto;
+                padding: 20px;
+                line-height: 1.5;
+            }
+            input {
+                padding: 10px 12px;
+                font-size: 16px;
+                width: 260px;
+                max-width: 100%;
+            }
+            button {
+                padding: 10px 14px;
+                font-size: 16px;
+                cursor: pointer;
+                margin-left: 8px;
+            }
+            a {
+                color: #0a66c2;
+                text-decoration: none;
+            }
+        </style>
     </head>
     <body>
         <h1>WhatsApp Preview Generator</h1>
 
-        <form action="/share">
+        <form action="/share" method="get">
             <input name="word" placeholder="Enter a word" required />
-            <button>Share</button>
+            <button type="submit">Share</button>
         </form>
 
-        <br>
-        <a href="/stats">View Stats</a>
+        <p style="margin-top: 20px;">
+            <a href="/stats">View Stats</a>
+        </p>
     </body>
     </html>
     """
@@ -218,44 +233,100 @@ def home():
 
 @app.get("/share")
 def share(word: str):
-    url = f"{BASE_URL}/p/{quote(word)}"
+    url = f"{BASE_URL}/p/{quote(word.strip())}"
     return RedirectResponse(f"https://wa.me/?text={quote(url)}")
 
 
 @app.get("/og-image/{word}")
 def og_image(word: str):
-    return Response(build_og_image(word), media_type="image/jpeg")
+    return Response(build_og_image(), media_type="image/jpeg")
 
 
 @app.get("/p/{word}", response_class=HTMLResponse)
 def preview(word: str, request: Request):
     clean_word = word.strip()
+    safe_title = html.escape(build_title(clean_word))
+    safe_description = html.escape(build_description())
     og_image_url = f"{BASE_URL}/og-image/{quote(clean_word)}"
     page_url = str(request.url)
 
-    uid = request.cookies.get("uid") or str(uuid.uuid4())
-    device = detect_device(request.headers.get("user-agent", ""))
+    user_agent = request.headers.get("user-agent", "")
+    bot_request = is_preview_bot(user_agent)
 
-    if "whatsapp" not in request.headers.get("user-agent", "").lower():
+    uid = request.cookies.get("uid")
+    new_user = False
+
+    if not uid:
+        uid = str(uuid.uuid4())
+        new_user = True
+
+    device = detect_device(user_agent)
+
+    if not bot_request:
         record_click(clean_word, uid, device)
 
-    html_content = f"""
-    <html>
-    <head>
-        <meta property="og:title" content="{clean_word}" />
-        <meta property="og:description" content="Tap to view" />
-        <meta property="og:image" content="{og_image_url}" />
-        <meta property="og:url" content="{page_url}" />
-        <meta property="og:type" content="website" />
+    if bot_request:
+        # No redirect for bots/crawlers. Let them read metadata.
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8" />
+            <title>{safe_title}</title>
 
-        <meta http-equiv="refresh" content="0; url={CLICK_TARGET}" />
-    </head>
-    <body></body>
-    </html>
-    """
+            <meta property="og:type" content="website" />
+            <meta property="og:title" content="{safe_title}" />
+            <meta property="og:description" content="{safe_description}" />
+            <meta property="og:image" content="{og_image_url}" />
+            <meta property="og:url" content="{page_url}" />
+
+            <meta name="twitter:card" content="summary_large_image" />
+            <meta name="twitter:title" content="{safe_title}" />
+            <meta name="twitter:description" content="{safe_description}" />
+            <meta name="twitter:image" content="{og_image_url}" />
+        </head>
+        <body></body>
+        </html>
+        """
+    else:
+        # Real users get redirected immediately.
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8" />
+            <title>{safe_title}</title>
+
+            <meta property="og:type" content="website" />
+            <meta property="og:title" content="{safe_title}" />
+            <meta property="og:description" content="{safe_description}" />
+            <meta property="og:image" content="{og_image_url}" />
+            <meta property="og:url" content="{page_url}" />
+
+            <meta name="twitter:card" content="summary_large_image" />
+            <meta name="twitter:title" content="{safe_title}" />
+            <meta name="twitter:description" content="{safe_description}" />
+            <meta name="twitter:image" content="{og_image_url}" />
+
+            <meta http-equiv="refresh" content="0; url={CLICK_TARGET}" />
+            <script>
+                window.location.replace("{CLICK_TARGET}");
+            </script>
+        </head>
+        <body></body>
+        </html>
+        """
 
     response = HTMLResponse(html_content)
-    response.set_cookie("uid", uid, max_age=31536000)
+
+    if new_user:
+        response.set_cookie(
+            "uid",
+            uid,
+            max_age=31536000,
+            httponly=True,
+            samesite="Lax"
+        )
 
     return response
 
@@ -264,25 +335,69 @@ def preview(word: str, request: Request):
 def stats():
     total, unique, device_data, recent = get_stats()
 
-    device_html = "".join(f"<li>{d}: {c}</li>" for d, c in device_data)
+    device_html = "".join(
+        f"<tr><td>{html.escape(device)}</td><td>{count}</td></tr>"
+        for device, count in device_data
+    )
 
     rows = "".join(
-        f"<tr><td>{w}</td><td>{t}</td><td>{d}</td></tr>"
-        for w, t, d in recent
+        f"<tr><td>{html.escape(word)}</td><td>{html.escape(timestamp)}</td><td>{html.escape(device)}</td></tr>"
+        for word, timestamp, device in recent
     )
 
     return f"""
-    <h1>Analytics</h1>
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Analytics</title>
+        <style>
+            body {{
+                font-family: Arial, sans-serif;
+                max-width: 960px;
+                margin: 40px auto;
+                padding: 20px;
+            }}
+            table {{
+                border-collapse: collapse;
+                width: 100%;
+                margin-top: 12px;
+            }}
+            th, td {{
+                border: 1px solid #ddd;
+                padding: 10px;
+                text-align: left;
+            }}
+            th {{
+                background: #f5f5f5;
+            }}
+            .section {{
+                margin-top: 28px;
+            }}
+        </style>
+    </head>
+    <body>
+        <h1>Analytics</h1>
 
-    <p>Total Clicks: {total}</p>
-    <p>Unique Users: {unique}</p>
+        <p><strong>Total Clicks:</strong> {total}</p>
+        <p><strong>Unique Users:</strong> {unique}</p>
 
-    <h2>Device Breakdown</h2>
-    <ul>{device_html}</ul>
+        <div class="section">
+            <h2>Device Breakdown</h2>
+            <table>
+                <tr><th>Device Type</th><th>Clicks</th></tr>
+                {device_html}
+            </table>
+        </div>
 
-    <h2>Recent Clicks</h2>
-    <table border="1">
-        <tr><th>Word</th><th>Time</th><th>Device</th></tr>
-        {rows}
-    </table>
+        <div class="section">
+            <h2>Recent Clicks</h2>
+            <table>
+                <tr><th>Word</th><th>Timestamp (UTC)</th><th>Device Type</th></tr>
+                {rows}
+            </table>
+        </div>
+    </body>
+    </html>
     """

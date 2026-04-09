@@ -14,22 +14,19 @@ app = FastAPI()
 
 BASE_URL = "https://whatsapp-preview-generator.onrender.com"
 
-# ✅ HARDCODED IMAGE
+# ---------------- HARDCODED CAMPAIGN ----------------
+
 IMAGE_URL = "https://zcdhhxgmbzqhpfjgwhkg.supabase.co/storage/v1/object/public/generated-images/96b09442-fc9f-4319-b08b-efbc50f734cb/0.png"
 
-# ✅ HARDCODED CAPTION
 CAPTION = """A single trader entered April 8 with over $84 million in Bitcoin shorts. Entry was between $66,975 and $67,264. Bitcoin ran to $72,767, and the account closed at $914. Across the market, $596 million in positions cleared inside 24 hours, with shorts absorbing the bulk. That is what a crowded position looks like when the squeeze arrives without warning.
 Bitcoin Multipliers on Deriv Trader. Up to 800x. Your loss stays at your stake."""
 
-CLICK_TARGET = (
-    "https://partner-sandbox-tracking.deriv.com/click"
-    "?a=2676&o=1&c=3&link_id=1"
-)
+CLICK_TARGET = "https://partner-sandbox-tracking.deriv.com/click?a=2676&o=1&c=3&link_id=1"
 
 DB_FILE = "clicks.db"
 
 
-# ---------------- DB ----------------
+# ---------------- DATABASE ----------------
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -149,7 +146,7 @@ def build_og_image(word):
     resp = requests.get(IMAGE_URL, timeout=20)
     img = Image.open(BytesIO(resp.content)).convert("RGB")
 
-    # Blurred background
+    # Background blur
     bg = img.resize((W, H), Image.LANCZOS)
     bg = bg.filter(ImageFilter.GaussianBlur(30))
 
@@ -171,17 +168,15 @@ def build_og_image(word):
         od.rectangle((0, i, W, i + 1), fill=(0, 0, 0, alpha))
 
     bg = Image.alpha_composite(bg.convert("RGBA"), overlay)
-
     draw = ImageDraw.Draw(bg)
 
     title = word.title()
+
     title_font = get_font(60, bold=True)
     desc_font = get_font(30)
 
-    # Title
     draw.text((40, H - 200), title, font=title_font, fill=(255, 255, 255))
 
-    # Caption
     lines = wrap_text(CAPTION, desc_font, W - 80, draw)
     y_text = H - 120
 
@@ -197,6 +192,29 @@ def build_og_image(word):
 
 
 # ---------------- ROUTES ----------------
+
+@app.get("/", response_class=HTMLResponse)
+def home():
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>WhatsApp Preview Generator</title>
+    </head>
+    <body>
+        <h1>WhatsApp Preview Generator</h1>
+
+        <form action="/share">
+            <input name="word" placeholder="Enter a word" required />
+            <button>Share</button>
+        </form>
+
+        <br>
+        <a href="/stats">View Stats</a>
+    </body>
+    </html>
+    """
+
 
 @app.get("/share")
 def share(word: str):
@@ -228,6 +246,7 @@ def preview(word: str, request: Request):
         <meta property="og:description" content="Tap to view" />
         <meta property="og:image" content="{og_image_url}" />
         <meta property="og:url" content="{page_url}" />
+        <meta property="og:type" content="website" />
 
         <meta http-equiv="refresh" content="0; url={CLICK_TARGET}" />
     </head>
@@ -254,13 +273,14 @@ def stats():
 
     return f"""
     <h1>Analytics</h1>
+
     <p>Total Clicks: {total}</p>
     <p>Unique Users: {unique}</p>
 
     <h2>Device Breakdown</h2>
     <ul>{device_html}</ul>
 
-    <h2>Recent</h2>
+    <h2>Recent Clicks</h2>
     <table border="1">
         <tr><th>Word</th><th>Time</th><th>Device</th></tr>
         {rows}

@@ -116,35 +116,74 @@ def detect_device(user_agent: str) -> str:
     return "unknown"
 
 
-def is_preview_bot(user_agent: str) -> bool:
+def detect_platform(user_agent: str) -> str:
     ua = (user_agent or "").lower()
 
-    bot_markers = [
-        "facebookexternalhit",
-        "facebot",
-        "twitterbot",
-        "x-twitterbot",
-        "linkedinbot",
-        "slackbot",
-        "discordbot",
-        "whatsapp",
-        "telegrambot",
-        "skypeuripreview",
-        "bot",
-        "crawler",
-        "spider",
-        "preview",
-    ]
+    if "facebookexternalhit" in ua or "facebot" in ua:
+        return "facebook"
+    if "twitterbot" in ua or "x-twitterbot" in ua:
+        return "x"
+    if "linkedinbot" in ua:
+        return "linkedin"
+    if "slackbot" in ua:
+        return "slack"
+    if "discordbot" in ua:
+        return "discord"
+    if "whatsapp" in ua:
+        return "whatsapp"
+    if "telegrambot" in ua:
+        return "telegram"
+    if "skypeuripreview" in ua:
+        return "skype"
+    if any(x in ua for x in ["bot", "crawler", "spider", "preview"]):
+        return "other_bot"
 
-    return any(marker in ua for marker in bot_markers)
+    return "human"
+
+
+def is_preview_bot(user_agent: str) -> bool:
+    return detect_platform(user_agent) != "human"
 
 
 def build_title(word: str) -> str:
     return word.strip().title()
 
 
-def build_description() -> str:
-    return CAPTION
+def truncate_text(text: str, max_chars: int) -> str:
+    text = " ".join((text or "").split())
+    if len(text) <= max_chars:
+        return text
+
+    truncated = text[:max_chars].rstrip()
+
+    if " " in truncated:
+        truncated = truncated.rsplit(" ", 1)[0]
+
+    return truncated.rstrip(" .,;:-") + "…"
+
+
+def build_description_for_platform(user_agent: str) -> str:
+    platform = detect_platform(user_agent)
+
+    # Conservative limits to keep previews clean and avoid overlong snippets.
+    if platform == "whatsapp":
+        limit = 160
+    elif platform == "facebook":
+        limit = 200
+    elif platform == "x":
+        limit = 200
+    elif platform == "linkedin":
+        limit = 200
+    elif platform == "slack":
+        limit = 220
+    elif platform == "discord":
+        limit = 220
+    elif platform == "telegram":
+        limit = 220
+    else:
+        limit = 200
+
+    return truncate_text(CAPTION, limit)
 
 
 # ---------------- OG IMAGE ----------------
@@ -156,11 +195,11 @@ def build_og_image():
     resp.raise_for_status()
     img = Image.open(BytesIO(resp.content)).convert("RGB")
 
-    # blurred background
+    # Blurred background
     bg = img.resize((W, H), Image.LANCZOS)
     bg = bg.filter(ImageFilter.GaussianBlur(30))
 
-    # fit full image without cropping
+    # Fit full image without cropping
     ratio = min(W / img.width, H / img.height)
     new_w = int(img.width * ratio)
     new_h = int(img.height * ratio)
@@ -240,16 +279,16 @@ def og_image(word: str):
     return Response(build_og_image(), media_type="image/jpeg")
 
 
-@app.get("/p/{word}", response_class=HTMLResponse)
+@app.api_route("/p/{word}", methods=["GET", "HEAD"], response_class=HTMLResponse)
 def preview(word: str, request: Request):
     clean_word = word.strip()
-    safe_title = html.escape(build_title(clean_word))
-    safe_description = html.escape(build_description())
-    og_image_url = f"{BASE_URL}/og-image/{quote(clean_word)}"
-    page_url = str(request.url)
-
     user_agent = request.headers.get("user-agent", "")
     bot_request = is_preview_bot(user_agent)
+
+    safe_title = html.escape(build_title(clean_word))
+    safe_description = html.escape(build_description_for_platform(user_agent))
+    og_image_url = f"{BASE_URL}/og-image/{quote(clean_word)}"
+    page_url = str(request.url)
 
     uid = request.cookies.get("uid")
     new_user = False
@@ -260,7 +299,7 @@ def preview(word: str, request: Request):
 
     device = detect_device(user_agent)
 
-    if not bot_request:
+    if not bot_request and request.method == "GET":
         record_click(clean_word, uid, device)
 
     base_head = f"""
@@ -281,7 +320,7 @@ def preview(word: str, request: Request):
         <meta name="twitter:image" content="{og_image_url}" />
     """
 
-    if bot_request:
+    if bot_request or request.method == "HEAD":
         html_content = f"""
         <!DOCTYPE html>
         <html>
